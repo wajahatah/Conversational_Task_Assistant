@@ -42,6 +42,7 @@ Before you begin, make sure the following tools are installed on your machine.
 | Git | Any recent | https://git-scm.com/downloads |
 | Docker Desktop | 4.x+ | https://www.docker.com/products/docker-desktop/ |
 | Docker Compose | V2 (bundled with Docker Desktop) | *(included above)* |
+| uv *(recommended)* | 0.4+ | https://docs.astral.sh/uv/getting-started/installation/ |
 
 **Verify your installations:**
 
@@ -83,7 +84,9 @@ Conversational_Task_Assistant/
 ├── tests/
 ├── .env.example             ← template for your .env
 ├── alembic.ini
-├── requirements.txt
+├── pyproject.toml           ← project metadata & dependencies (uv)
+├── uv.lock                  ← pinned dependency lock file
+├── requirements.txt         ← legacy pip install list
 └── run_polling.py
 ```
 
@@ -117,7 +120,63 @@ You should see `(venv)` at the start of your terminal prompt.
 
 ## 4. Install Python Dependencies
 
-With the virtual environment active:
+Two methods are available. **uv is recommended** — it is significantly faster than
+pip and uses the pinned `uv.lock` file to guarantee reproducible installs.
+
+---
+
+### Method A — uv (Recommended)
+
+[uv](https://docs.astral.sh/uv/) is a fast Python package manager written in Rust.
+
+**Install uv** (one-time, run outside the virtual environment):
+
+```bash
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+**Install all project dependencies from the lock file:**
+
+```bash
+# Creates .venv automatically and installs all pinned packages
+uv sync
+
+# Also install the dev group (pytest etc.) — included by default
+uv sync --group dev
+```
+
+**Activate the environment created by uv:**
+
+```bash
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+
+# Windows (Command Prompt)
+.venv\Scripts\activate.bat
+
+# macOS / Linux
+source .venv/bin/activate
+```
+
+**Optional — HuggingFace local inference extra:**
+
+```bash
+# CPU only
+uv sync --extra huggingface
+
+# NVIDIA GPU (CUDA 12.4) — override torch index
+uv sync --extra huggingface --index-url https://download.pytorch.org/whl/cu124
+```
+
+---
+
+### Method B — pip (Classic)
+
+With the virtual environment active (see Step 3):
 
 ```bash
 pip install --upgrade pip
@@ -407,7 +466,13 @@ Best for: highest quality results with minimal setup.
 Alembic creates all necessary tables inside the PostgreSQL container.
 
 Make sure the containers are running (`docker compose -f docker/docker-compose.yml ps`)
-and your virtual environment is activated, then run from the **project root**:
+and your virtual environment is activated, then run from the **project root** to generate the initial migration:
+
+```bash
+alembic revision --autogenerate -m "initial_schema"
+```
+
+Then, apply the migration to create the tables:
 
 ```bash
 alembic upgrade head
@@ -450,11 +515,16 @@ virtual environment in each.
 This process evaluates task states and dispatches nudges/summaries on a schedule.
 
 ```bash
-# Windows
+# Windows (Requires two separate terminals)
+# Terminal A (Worker):
 venv\Scripts\activate.bat
-celery -A app.scheduler.celery_app worker --beat --loglevel=info
+celery -A app.scheduler.celery_app worker --pool=solo --loglevel=info
 
-# macOS / Linux
+# Terminal B (Beat Scheduler):
+venv\Scripts\activate.bat
+celery -A app.scheduler.celery_app beat --loglevel=info
+
+# macOS / Linux (Can be run together)
 source venv/bin/activate
 celery -A app.scheduler.celery_app worker --beat --loglevel=info
 ```
