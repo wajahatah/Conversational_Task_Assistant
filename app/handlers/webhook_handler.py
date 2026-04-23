@@ -10,7 +10,7 @@ Routes messages based on user registration state:
 from __future__ import annotations
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_db
@@ -24,6 +24,7 @@ from app.platform.base import MessageType
 from app.services.registration import (
     get_user_by_platform_id,
     process_registration_step,
+    restart_registration,
     start_registration,
 )
 
@@ -51,10 +52,14 @@ async def process_update_from_polling(payload: dict, db: AsyncSession) -> None:
 
 async def _process_update(payload: dict, db: AsyncSession) -> dict:
     adapter = get_platform_adapter()
-    print("DEBUG: Processing update in webhook_handler")
 
     # ── Parse incoming message ─────────────────────────────────────────────
-    msg = await adapter.parse_incoming(payload)
+    try:
+        msg = await adapter.parse_incoming(payload)
+    except Exception as exc:
+        logger.error("Failed to parse incoming update", error=str(exc), exc_info=True)
+        return {"ok": True}
+
     if msg is None:
         logger.debug("Ignored update type or parsing failed", payload=payload)
         return {"ok": True}  # ignored update type
@@ -63,26 +68,35 @@ async def _process_update(payload: dict, db: AsyncSession) -> dict:
     logger.info("Processing message", platform_id=platform_id, message_type=msg.message_type)
 
     # ── Lookup user ────────────────────────────────────────────────────────
-    user = await get_user_by_platform_id(db, platform_id)
+    try:
+        user = await get_user_by_platform_id(db, platform_id)
+    except Exception as exc:
+        logger.error("DB error looking up user", platform_id=platform_id, error=str(exc))
+        return {"ok": True}
 
     # ── Unknown user — start registration ─────────────────────────────────
     if user is None:
         logger.info("New user detected, starting registration", platform_id=platform_id)
-        await start_registration(db, msg)
+        try:
+            await start_registration(db, msg)
+        except Exception as exc:
+            logger.error("Registration start failed", platform_id=platform_id, error=str(exc))
         return {"ok": True}
 
     # ── Registering user — continue onboarding ────────────────────────────
     if user.registration_state is not None:
-        # Commands bypass registration during onboarding (e.g. /start restart)
+        # /start always restarts the registration flow from the beginning
         if msg.message_type == MessageType.COMMAND and msg.command == "start":
-            from app.services.notification_service import send_plain_message
-            await send_plain_message(
-                platform_id,
-                "⏳ Please complete your registration first\\. What's your name?",
-            )
+            try:
+                await restart_registration(db, user, msg)
+            except Exception as exc:
+                logger.error("Registration restart failed", platform_id=platform_id, error=str(exc))
             return {"ok": True}
 
-        await process_registration_step(db, user, msg)
+        try:
+            await process_registration_step(db, user, msg)
+        except Exception as exc:
+            logger.error("Registration step failed", platform_id=platform_id, error=str(exc))
         return {"ok": True}
 
     # ── Fully registered user — route to appropriate handler ──────────────

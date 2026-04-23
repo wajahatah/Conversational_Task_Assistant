@@ -149,7 +149,7 @@ async def handle_text_message(
         .join(Task, Interaction.task_id == Task.id)
         .where(
             Interaction.user_id == user.id,
-            Interaction.response_type == ResponseType.need_help,
+            Interaction.response_type == ResponseType.NEED_HELP,
             Task.state == TaskState.ACTIVE,
         )
         .order_by(Interaction.created_at.desc())
