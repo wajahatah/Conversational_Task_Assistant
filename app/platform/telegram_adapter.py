@@ -39,6 +39,13 @@ POLL_OPTION_LABELS: dict[str, str] = {
 class TelegramAdapter(BasePlatformAdapter):
     def __init__(self) -> None:
         self._bot = Bot(token=settings.telegram_bot_token)
+        self._initialized = False
+
+    async def _ensure_initialized(self) -> None:
+        """Initialize the bot's HTTP client on first use (python-telegram-bot v20+ requirement)."""
+        if not self._initialized:
+            await self._bot.initialize()
+            self._initialized = True
 
     @property
     def platform_name(self) -> str:
@@ -53,6 +60,7 @@ class TelegramAdapter(BasePlatformAdapter):
         - Bot commands (/start, /tasks, etc.)
         - Inline keyboard callback queries (poll responses)
         """
+        await self._ensure_initialized()
         try:
             update = Update.de_json(payload, self._bot)
         except Exception as exc:
@@ -62,7 +70,10 @@ class TelegramAdapter(BasePlatformAdapter):
         # ── Callback query (poll/button response) ──────────────────────────
         if update.callback_query:
             query = update.callback_query
-            await query.answer()  # Dismiss the loading spinner on Telegram side
+            try:
+                await query.answer()  # Dismiss the loading spinner on Telegram side
+            except Exception as exc:
+                logger.warning("Failed to answer callback query", error=str(exc))
             platform_id = str(query.from_user.id)
             return NormalizedMessage(
                 platform="telegram",
@@ -104,7 +115,7 @@ class TelegramAdapter(BasePlatformAdapter):
 
     async def send_message(self, message: OutboundMessage) -> str | None:
         """Send a plain text message or a message with inline keyboard buttons."""
-        print(f"DEBUG: Attempting to send message to {message.platform_id}")
+        await self._ensure_initialized()
         logger.debug("Sending message", platform_id=message.platform_id, text=message.text)
         try:
             if message.poll_options:
@@ -145,6 +156,7 @@ class TelegramAdapter(BasePlatformAdapter):
         Send a task status poll as an inline keyboard.
         Telegram native polls don't support callbacks, so we use inline buttons.
         """
+        await self._ensure_initialized()
         keyboard = self._build_keyboard(options)
         try:
             sent = await self._bot.send_message(
