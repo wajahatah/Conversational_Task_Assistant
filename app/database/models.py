@@ -31,6 +31,7 @@ class Base(DeclarativeBase):
 class Platform(str, enum.Enum):
     TELEGRAM = "telegram"
     SLACK = "slack"
+    DISCORD = "discord"
 
 
 class TaskState(str, enum.Enum):
@@ -88,13 +89,23 @@ class User(Base):
     )
 
     # ── Relationships ──
-    tasks: Mapped[list["Task"]] = relationship("Task", back_populates="user", lazy="selectin")
-    interactions: Mapped[list["Interaction"]] = relationship("Interaction", back_populates="user")
+    # cascade="all, delete-orphan": deleting a User deletes all child rows via
+    # the ORM (works even when children are already loaded via selectin).
+    tasks: Mapped[list["Task"]] = relationship(
+        "Task", back_populates="user", lazy="selectin",
+        cascade="all, delete-orphan",
+    )
+    interactions: Mapped[list["Interaction"]] = relationship(
+        "Interaction", back_populates="user",
+        cascade="all, delete-orphan",
+    )
     conversation_history: Mapped[list["ConversationHistory"]] = relationship(
-        "ConversationHistory", back_populates="user"
+        "ConversationHistory", back_populates="user",
+        cascade="all, delete-orphan",
     )
     settings: Mapped["UserSettings"] = relationship(
-        "UserSettings", back_populates="user", uselist=False, lazy="selectin"
+        "UserSettings", back_populates="user", uselist=False, lazy="selectin",
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:
