@@ -16,19 +16,21 @@ you're stuck, and delivers an automated morning briefing every day.
 5. [Spin Up Infrastructure with Docker](#5-spin-up-infrastructure-with-docker)
 6. [Configure Environment Variables](#6-configure-environment-variables)
 7. [Create a Telegram Bot](#7-create-a-telegram-bot)
-8. [Choose & Configure an LLM Provider](#8-choose--configure-an-llm-provider)
+8. [Create a Discord Bot](#8-create-a-discord-bot)
+9. [Choose & Configure an LLM Provider](#9-choose--configure-an-llm-provider)
    - [Option A — Ollama (Local, Free)](#option-a--ollama-local-free)
    - [Option B — HuggingFace (Local, Free)](#option-b--huggingface-local-free)
    - [Option C — OpenAI](#option-c--openai)
    - [Option D — Google Gemini](#option-d--google-gemini)
    - [Option E — Anthropic Claude](#option-e--anthropic-claude)
-9. [Run Database Migrations](#9-run-database-migrations)
-10. [Start the Application](#10-start-the-application)
-11. [Test the Bot](#11-test-the-bot)
-12. [Verify Everything Is Working](#12-verify-everything-is-working)
-13. [Bot Commands Reference](#13-bot-commands-reference)
-14. [Architecture Overview](#14-architecture-overview)
-15. [Troubleshooting](#15-troubleshooting)
+10. [Run Database Migrations](#10-run-database-migrations)
+11. [Start the Application](#11-start-the-application)
+12. [Test the Bot](#12-test-the-bot)
+13. [Verify Everything Is Working](#13-verify-everything-is-working)
+14. [Bot Commands Reference](#14-bot-commands-reference)
+15. [Architecture Overview](#15-architecture-overview)
+16. [Troubleshooting](#16-troubleshooting)
+17. [Switching Between Platforms](#17-switching-between-platforms)
 
 ---
 
@@ -274,8 +276,9 @@ cp .env.example .env
 The file is split into sections. Here are the **required** ones:
 
 ```env
-# ── Telegram (REQUIRED) ──────────────────────────────────────────────────────
+# ── Bot Platform (REQUIRED - Choose at least one) ───────────────────────────
 TELEGRAM_BOT_TOKEN=your_bot_token_here   # See Step 7 below
+DISCORD_BOT_TOKEN=your_discord_token_here # See Step 8 below
 
 # ── Database — must match docker/.env ────────────────────────────────────────
 POSTGRES_HOST=localhost
@@ -291,7 +294,7 @@ REDIS_URL=redis://localhost:6379/0
 CELERY_BROKER_URL=redis://localhost:6379/1
 CELERY_RESULT_BACKEND=redis://localhost:6379/2
 
-# ── LLM Provider (choose ONE, see Step 8) ────────────────────────────────────
+# ── LLM Provider (choose ONE, see Step 9) ────────────────────────────────────
 LLM_PROVIDER=ollama                      # ollama | huggingface | openai | gemini | anthropic
 ```
 
@@ -331,7 +334,36 @@ If you plan to add the bot to a group, send BotFather:
 
 ---
 
-## 8. Choose & Configure an LLM Provider
+## 8. Create a Discord Bot
+
+You need a Discord Bot Token to connect the application to Discord.
+
+### Step-by-step:
+
+1.  Open the [Discord Developer Portal](https://discord.com/developers/applications).
+2.  Click **New Application** and give it a name (e.g., `My Task Assistant`).
+3.  In the left sidebar, click **Bot**.
+4.  Click **Reset Token** (or **Copy Token**) to get your bot token.
+5.  **Enable Intents (CRITICAL)**: Scroll down to the **Privileged Gateway Intents** section and enable **MESSAGE CONTENT INTENT**.
+    - This allows the bot to read your natural language tasks.
+6.  **Invite to Server**:
+    - Go to **OAuth2 → URL Generator**.
+    - Select the `bot` scope.
+    - Select permissions: `Send Messages`, `Read Message History`.
+    - Copy the generated URL and open it in your browser to authorize the bot.
+7.  Copy that token and paste it into your `.env` file:
+    ```env
+    DISCORD_BOT_TOKEN=MTIzNDU2Nzg5MDEyMzQ1Njc4OQ.XxxxxX.xxxxxxxxxxxxxxxxxxxxxxxxxxx
+    ```
+
+> **Keep your token secret.** Anyone with it can control your bot.
+> Never commit `.env` to git (it is already in `.gitignore`).
+
+> **Note:** If both `TELEGRAM_BOT_TOKEN` and `DISCORD_BOT_TOKEN` are set, the application will prioritize Telegram. To use Discord, leave `TELEGRAM_BOT_TOKEN` empty or unset.
+
+---
+
+## 9. Choose & Configure an LLM Provider
 
 The assistant uses an LLM to parse natural language tasks and power the help
 conversations. Pick **one** provider and configure it in `.env`.
@@ -461,7 +493,7 @@ Best for: highest quality results with minimal setup.
 
 ---
 
-## 9. Run Database Migrations
+## 10. Run Database Migrations
 
 Alembic creates all necessary tables inside the PostgreSQL container.
 
@@ -538,9 +570,11 @@ You should see:
 [2026-04-20 ...] celery@hostname ready.
 ```
 
-### Terminal 2 — Telegram Bot (Long-Polling)
+### Terminal 2 — Bot Runner (Choose ONE)
 
-This process listens to Telegram and routes all incoming messages.
+This process listens to the platform (Telegram or Discord) and routes all incoming messages.
+
+#### Option A — Telegram Bot (Long-Polling)
 
 ```bash
 # Windows
@@ -552,10 +586,16 @@ source venv/bin/activate
 python run_polling.py
 ```
 
-You should see:
-```
-Starting Telegram polling mode...
-Bot is running. Press Ctrl+C to stop.
+#### Option B — Discord Bot
+
+```bash
+# Windows
+venv\Scripts\activate.bat
+python run_discord.py
+
+# macOS / Linux
+source venv/bin/activate
+python run_discord.py
 ```
 
 ### Terminal 3 (Optional) — FastAPI Dev Server
@@ -570,11 +610,11 @@ Open: http://localhost:8000/docs
 
 ---
 
-## 11. Test the Bot
+## 12. Test the Bot
 
-1. Open Telegram on your phone or desktop.
-2. Search for your bot's username (the one you set with BotFather).
-3. Tap **Start** or send `/start`.
+1. Open your chosen chat app (Telegram or Discord).
+2. Search for your bot or DM it directly.
+3. Send `/start`.
 
 **Registration flow:**
 
@@ -702,26 +742,26 @@ docker exec -it task_kafka kafka-topics --bootstrap-server localhost:9092 --list
 
 ---
 
-## 14. Architecture Overview
+## 15. Architecture Overview
 
 ```
-Telegram User
+Platform User (Telegram/Discord)
      │
      ▼
-run_polling.py ──► webhook_handler.py
-                         │
-              ┌──────────▼──────────────┐
-              │                         │
-              ▼                         ▼
-  registration.py             interaction_handler.py
-  (new users)                 (registered users)
-                                        │
-                         ┌──────────────┼──────────────┐
-                         ▼              ▼               ▼
-                  handle_command  handle_text    handle_poll_response
+run_polling.py / run_discord.py ──► webhook_handler.py
                                        │
-                               task_service.py ──► LLM (parse task)
-                               orchestrator.py ──► LLM (help chat)
+                            ┌──────────▼──────────────┐
+                            │                         │
+                            ▼                         ▼
+                registration.py             interaction_handler.py
+                (new users)                 (registered users)
+                                                      │
+                                       ┌──────────────┼──────────────┐
+                                       ▼              ▼               ▼
+                                handle_command  handle_text    handle_poll_response
+                                                     │
+                                             task_service.py ──► LLM (parse task)
+                                             orchestrator.py ──► LLM (help chat)
 
 Celery Beat (every 5 min)
      │
@@ -743,7 +783,7 @@ dispatch_daily_summaries()
 
 | Component | Technology |
 |-----------|-----------|
-| Bot messaging | python-telegram-bot v21 |
+| Bot messaging | python-telegram-bot v21 / discord.py v2.3 |
 | Web framework | FastAPI + uvicorn |
 | Database | PostgreSQL 16 (asyncpg + SQLAlchemy) |
 | Task queue | Celery + Redis |
@@ -752,7 +792,7 @@ dispatch_daily_summaries()
 
 ---
 
-## 15. Troubleshooting
+## 16. Troubleshooting
 
 ### Common Issues
 
@@ -760,9 +800,10 @@ dispatch_daily_summaries()
 |---------|-------------|-----|
 | `connection refused :5432` | Postgres container not running | `docker compose -f docker/docker-compose.yml up -d postgres` |
 | `connection refused :6379` | Redis container not running | `docker compose -f docker/docker-compose.yml up -d redis` |
-| `alembic upgrade head` fails | DB user doesn't have schema permission | Run the SQL in Step 9 again |
+| `alembic upgrade head` fails | DB user doesn't have schema permission | Run the SQL in Step 10 again |
 | `TELEGRAM_BOT_TOKEN invalid` | Wrong token in `.env` | Copy from BotFather, no extra spaces |
-| Bot doesn't respond | `run_polling.py` not running | Open Terminal 2, run `python run_polling.py` |
+| `DISCORD_BOT_TOKEN invalid` | Wrong token in `.env` | Copy from Discord Portal |
+| Bot doesn't respond | Runner not running | Ensure `run_polling.py` or `run_discord.py` is running |
 | No nudges/summaries | Celery not running | Open Terminal 1, run the celery command |
 | HuggingFace slow first start | Model downloading (~7 GB) | Wait — only happens once |
 | `No module named 'transformers'` | Extra deps not installed | `pip install transformers torch accelerate` |
@@ -800,6 +841,26 @@ If you need a clean slate:
 docker exec -it task_postgres psql -U task_user -d task_assistant -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
 alembic upgrade head
 ```
+
+---
+
+## 17. Switching Between Platforms
+
+If you've already set up the project and want to switch from Telegram to Discord (or vice-versa), you **do not** need to re-install anything or reset your database. The application is designed to be multi-platform.
+
+### To switch platforms:
+
+1.  **Update `.env`**:
+    - To use **Discord**: Ensure `DISCORD_BOT_TOKEN` is set and `TELEGRAM_BOT_TOKEN` is **empty or commented out** (Telegram has priority if both are set).
+    - To use **Telegram**: Ensure `TELEGRAM_BOT_TOKEN` is set.
+2.  **Switch the Runner**:
+    - Stop the current bot process (Ctrl+C).
+    - Run the other script: `python run_discord.py` or `python run_polling.py`.
+3.  **Registration**:
+    - Since your Telegram ID and Discord ID are different, the bot will ask you to register again on the new platform.
+    - Your existing tasks from the previous platform will stay in the database but will not be visible on the new platform.
+
+> **Note**: The Celery worker and database are shared, so scheduled tasks for the previous platform will continue to trigger in the background until the tasks are completed or deleted.
 
 ---
 
