@@ -1,0 +1,39 @@
+
+services:
+  # ─── PostgreSQL ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: task_assistant_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-task_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-task_password}
+      POSTGRES_DB: ${POSTGRES_DB:-task_assistant}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-task_user} -d ${POSTGRES_DB:-task_assistant}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Redis (Broker + Cache) ──────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: task_assistant_redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
