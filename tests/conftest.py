@@ -2,11 +2,64 @@
 Test fixtures for the Conversational Task Assistant.
 """
 
+import asyncio
+import sys
+
 import pytest
+import pytest_asyncio
 from datetime import datetime, timedelta, timezone
 
 from app.database.models import Task, TaskState, UserSettings
 
+# ── Windows: switch to SelectorEventLoop so asyncpg works with pytest-asyncio.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+
+# ── Session-scoped engine override ────────────────────────────────────────────
+#
+# The module-level engine in app/database/session.py is created at import time,
+# before pytest-asyncio sets up its session event loop. Asyncpg binds futures to
+# the loop that was running at connection time, so reusing those connections in a
+# different loop raises "Future attached to a different loop".
+#
+# Fix: for the test session, swap in a NullPool engine (no pooling, no pre-ping,
+# no loop-affinity problems). Each acquire gets a fresh connection.
+
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def _test_db_engine():
+    """Replace the shared engine with a NullPool engine for the test session."""
+    from sqlalchemy.pool import NullPool
+    from sqlalchemy.ext.asyncio import (
+        AsyncSession,
+        async_sessionmaker,
+        create_async_engine,
+    )
+    import app.database.session as db_module
+    from app.config import settings
+
+    test_engine = create_async_engine(
+        settings.database_url,
+        poolclass=NullPool,
+        echo=False,
+    )
+    test_factory = async_sessionmaker(
+        bind=test_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+        autocommit=False,
+    )
+
+    db_module.engine = test_engine
+    db_module.AsyncSessionLocal = test_factory
+
+    yield
+
+    await test_engine.dispose()
+
+
+# ── Shared fixtures ───────────────────────────────────────────────────────────
 
 @pytest.fixture
 def mock_now():

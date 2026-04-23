@@ -3,7 +3,7 @@ Integration tests for the Registration flow.
 """
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.platform.base import NormalizedMessage, MessageType
 from app.services.registration import process_registration_step, start_registration
@@ -14,7 +14,8 @@ from app.database.models import User, Platform, UserSettings
 def mock_db_session():
     """Mock an async SQLAlchemy session."""
     session = AsyncMock()
-    # For scalar_one_or_none
+    # db.add() is synchronous in SQLAlchemy — use a plain mock to avoid coroutine warnings
+    session.add = MagicMock()
     session.execute.return_value.scalar_one_or_none.return_value = None
     return session
 
@@ -54,7 +55,7 @@ async def test_registration_flow_success(mock_db_session, mock_platform_adapter)
     # 2. Simulate User state in DB for the remaining steps
     test_user = User(
         id="test-uuid",
-        platform=Platform.telegram,
+        platform=Platform.TELEGRAM,
         platform_id="12345",
         registration_state="awaiting_name",
         settings=UserSettings()

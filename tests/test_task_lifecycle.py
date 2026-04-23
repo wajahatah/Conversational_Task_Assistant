@@ -3,17 +3,18 @@ Integration tests for the full Task Lifecycle.
 """
 
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timezone, timedelta
 
 from app.database.models import User, Task, TaskState
-from app.services.task_service import create_task_from_nl, get_active_tasks, update_task_state
+from app.services.task_service import create_task_from_nl, update_task_state
 from app.llm import ParsedTask
 
 
 @pytest.fixture
 def mock_db_session():
     session = AsyncMock()
+    session.add = MagicMock()
     return session
 
 
