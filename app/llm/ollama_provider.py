@@ -12,7 +12,7 @@ import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config import settings
-from app.llm.base import BaseLLMProvider, LLMResponse, Message, ParsedTask
+from app.llm.base import BaseLLMProvider, LLMResponse, Message, ParsedTask, build_parsed_task
 from app.llm.prompts import TASK_PARSE_SYSTEM, TASK_PARSE_USER
 
 
@@ -95,12 +95,7 @@ class OllamaProvider(BaseLLMProvider):
         data = response.json()
         raw = data["message"]["content"]
         parsed = json.loads(raw)
-        return ParsedTask(
-            title=parsed["title"],
-            start_time=parsed["start_time"],
-            deadline=parsed["deadline"],
-            description=parsed.get("description"),
-        )
+        return build_parsed_task(parsed)
 
     async def health_check(self) -> bool:
         try:

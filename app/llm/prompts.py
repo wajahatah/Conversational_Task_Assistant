@@ -16,19 +16,31 @@ Extract the following fields:
 - description: Any additional detail (null if none)
 
 Rules:
-- Use the user's timezone for all times.
+- Use the user's timezone for ALL times. Include the UTC offset in every datetime.
 - If no date is mentioned, assume today ({current_date}).
 - If only one time is mentioned, infer a reasonable duration (default 1 hour).
 - Times must be on the same calendar day ({current_date}) — tasks are one-day only.
-- deadline MUST be after start_time.
+- deadline MUST be strictly after start_time.
+- Accept ALL common time notations: "2pm", "14:00", "2:30pm", "2.30pm", "9.30 am",
+  "21:30", "9pm", "9:00pm". A dot in the time (e.g. "8.30pm") means 8 hours
+  30 minutes — treat it exactly like "8:30pm".
+- NEVER return null for start_time or deadline — always infer a value.
 
 Respond ONLY with a valid JSON object. No extra text, no markdown, no explanation.
 
-Example output:
+Example 1 — colon notation:
 {{
   "title": "Finish project report",
   "start_time": "2026-04-09T14:00:00+05:00",
   "deadline": "2026-04-09T18:00:00+05:00",
+  "description": null
+}}
+
+Example 2 — dot notation ("8.30pm to 9pm", timezone UTC+5):
+{{
+  "title": "Finish presentation",
+  "start_time": "2026-04-09T20:30:00+05:00",
+  "deadline": "2026-04-09T21:00:00+05:00",
   "description": null
 }}
 """

@@ -8,7 +8,7 @@ from openai import AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config import settings
-from app.llm.base import BaseLLMProvider, LLMResponse, Message, ParsedTask
+from app.llm.base import BaseLLMProvider, LLMResponse, Message, ParsedTask, build_parsed_task
 from app.llm.prompts import TASK_PARSE_SYSTEM, TASK_PARSE_USER
 
 
@@ -86,9 +86,4 @@ class OpenAIProvider(BaseLLMProvider):
         )
         raw = response.choices[0].message.content or "{}"
         data = json.loads(raw)
-        return ParsedTask(
-            title=data["title"],
-            start_time=data["start_time"],
-            deadline=data["deadline"],
-            description=data.get("description"),
-        )
+        return build_parsed_task(data)

@@ -8,7 +8,7 @@ import anthropic
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config import settings
-from app.llm.base import BaseLLMProvider, LLMResponse, Message, ParsedTask
+from app.llm.base import BaseLLMProvider, LLMResponse, Message, ParsedTask, build_parsed_task
 from app.llm.prompts import TASK_PARSE_SYSTEM, TASK_PARSE_USER
 
 _MAX_TOKENS = 1024
@@ -86,9 +86,4 @@ class AnthropicProvider(BaseLLMProvider):
         # Strip potential markdown code fences
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(raw)
-        return ParsedTask(
-            title=data["title"],
-            start_time=data["start_time"],
-            deadline=data["deadline"],
-            description=data.get("description"),
-        )
+        return build_parsed_task(data)

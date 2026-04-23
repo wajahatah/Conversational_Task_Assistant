@@ -8,7 +8,7 @@ import google.generativeai as genai
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config import settings
-from app.llm.base import BaseLLMProvider, LLMResponse, Message, ParsedTask
+from app.llm.base import BaseLLMProvider, LLMResponse, Message, ParsedTask, build_parsed_task
 from app.llm.prompts import TASK_PARSE_SYSTEM, TASK_PARSE_USER
 
 
@@ -77,9 +77,4 @@ class GeminiProvider(BaseLLMProvider):
         )
         response = await model.generate_content_async(user_prompt)
         data = json.loads(response.text)
-        return ParsedTask(
-            title=data["title"],
-            start_time=data["start_time"],
-            deadline=data["deadline"],
-            description=data.get("description"),
-        )
+        return build_parsed_task(data)

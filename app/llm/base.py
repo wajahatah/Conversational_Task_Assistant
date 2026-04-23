@@ -39,6 +39,24 @@ class ParsedTask:
     confidence: float = 1.0
 
 
+def build_parsed_task(data: dict) -> ParsedTask:
+    """
+    Build a ParsedTask from an LLM JSON response dict.
+
+    Raises ValueError (not KeyError) when required fields are missing or null,
+    so callers can distinguish parse failures from API/network errors.
+    """
+    missing = [f for f in ("title", "start_time", "deadline") if not data.get(f)]
+    if missing:
+        raise ValueError(f"LLM response missing required fields: {missing}")
+    return ParsedTask(
+        title=data["title"],
+        start_time=data["start_time"],
+        deadline=data["deadline"],
+        description=data.get("description"),
+    )
+
+
 class BaseLLMProvider(ABC):
     """
     Abstract interface for all LLM providers.
