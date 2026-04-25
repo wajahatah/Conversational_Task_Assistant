@@ -8,7 +8,7 @@ No LLM involvement. Inputs are timestamps, counters, and user responses.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import structlog
 
@@ -27,8 +27,8 @@ class StateResult:
     reason: str = ""
 
 
-def _now() -> datetime:
-    return datetime.now(tz=timezone.utc)
+def _now(offset_seconds: int = 0) -> datetime:
+    return datetime.now(tz=timezone.utc) + timedelta(seconds=offset_seconds)
 
 
 def infer_state(task: Task, user_settings=None) -> StateResult:
@@ -50,7 +50,8 @@ def infer_state(task: Task, user_settings=None) -> StateResult:
     Returns:
         StateResult with the inferred state, trigger level, and reason.
     """
-    now = _now()
+    offset = getattr(user_settings, "clock_offset_seconds", 0) or 0
+    now = _now(offset)
 
     # ── 1. Terminal states — no re-evaluation ──────────────────────────────
     if task.state == TaskState.COMPLETED:

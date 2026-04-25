@@ -179,8 +179,8 @@ async def handle_text_message(
             user.platform_id,
             f"📋 Task added\\!\n\n"
             f"*{_escape(task.title)}*\n"
-            f"🕐 Start: *{task.start_time.strftime('%H:%M')}*\n"
-            f"⏰ Deadline: *{task.deadline.strftime('%H:%M')}*\n\n"
+            f"🕐 Start: *{_fmt_time(task.start_time, user)}*\n"
+            f"⏰ Deadline: *{_fmt_time(task.deadline, user)}*\n\n"
             "I'll remind you when it's time\\. Good luck\\! 💪",
         )
     except TaskValidationError as exc:
@@ -207,10 +207,15 @@ async def handle_command(
             "👋 *Task Assistant Commands:*\n\n"
             "/tasks \\- View today's tasks\n"
             "/summary \\- Get your daily summary now\n"
+            "/register \\- Update your settings (Name, Timezone, etc.)\n"
             "/help \\- Show this help message\n\n"
             "Or just tell me your task:\n"
             "_\"Finish the report from 2pm to 5pm\"_",
         )
+
+    elif command == "register":
+        from app.services.registration import restart_registration
+        await restart_registration(db, user, msg)
 
     elif command == "tasks":
         tasks = await get_tasks_for_user_today(db, user.id)
@@ -233,7 +238,7 @@ async def handle_command(
                 emoji = state_emoji.get(t.state, "•")
                 lines.append(
                     f"{emoji} *{_escape(t.title)}* "
-                    f"\\({t.start_time.strftime('%H:%M')} \\- {t.deadline.strftime('%H:%M')}\\)"
+                    f"\\({_fmt_time(t.start_time, user)} \\- {_fmt_time(t.deadline, user)}\\)"
                 )
             await send_plain_message(user.platform_id, "\n".join(lines))
 

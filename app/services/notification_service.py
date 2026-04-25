@@ -131,9 +131,13 @@ async def send_plain_message(platform_id: str, text: str) -> None:
     await adapter.send_message(OutboundMessage(platform_id=platform_id, text=text))
 
 
-def _format_time(dt: datetime) -> str:
-    """Format datetime as HH:MM for display in messages."""
-    return _escape(dt.strftime("%H:%M"))
+def _format_time(dt: datetime, timezone_str: str = "UTC") -> str:
+    """Format a UTC-aware datetime as HH:MM in the given timezone."""
+    try:
+        tz = zoneinfo.ZoneInfo(timezone_str)
+    except (zoneinfo.ZoneInfoNotFoundError, KeyError):
+        tz = zoneinfo.ZoneInfo("UTC")
+    return _escape(dt.astimezone(tz).strftime("%H:%M"))
 
 
 def _escape(text: str) -> str:

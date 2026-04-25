@@ -32,6 +32,7 @@ STEPS = [
     "awaiting_phone",
     "awaiting_timezone",
     "awaiting_summary_time",
+    "awaiting_current_time",
 ]
 
 # Sent once on first contact — explains what will be collected
@@ -47,7 +48,8 @@ WELCOME_INTRO = (
     "2\\. 📧 *Email address*\n"
     "3\\. 📱 *Phone number* \\(optional\\)\n"
     "4\\. 🌍 *Timezone* \\(e\\.g\\. Asia/Karachi\\)\n"
-    "5\\. ⏰ *Daily summary time* \\(e\\.g\\. 08:00\\)\n\n"
+    "5\\. ⏰ *Daily summary time* \\(e\\.g\\. 08:00\\)\n"
+    "6\\. 🕐 *Current local time* \\(to calibrate your reminders\\)\n\n"
     "This will only take a minute\\. Let's go\\! 👇"
 )
 
@@ -65,9 +67,14 @@ STEP_PROMPTS = {
         "Or a UTC offset like `UTC+5` or `UTC-4`"
     ),
     "awaiting_summary_time": (
-        "Almost done\\! At what time should I send your *daily morning summary*?\n\n"
+        "At what time should I send your *daily morning summary*?\n\n"
         "Format: `HH:MM` in 24\\-hour time \\(e\\.g\\. `08:00` or `07:30`\\)\n"
         "Type `default` to use 08:00"
+    ),
+    "awaiting_current_time": (
+        "Almost done\\! What is the *current time* for you right now?\n\n"
+        "Format: `HH:MM` in 24\\-hour time \\(e\\.g\\. `14:30` or `09:05`\\)\n"
+        "This calibrates your reminders to the correct local time\\."
     ),
 }
 
@@ -225,6 +232,12 @@ async def process_registration_step(
     elif step == "awaiting_summary_time":
         summary_time = _parse_time(text)
         user.settings.summary_trigger_time = summary_time
+        next_step = "awaiting_current_time"
+        prompt = STEP_PROMPTS["awaiting_current_time"]
+
+    elif step == "awaiting_current_time":
+        reported = _parse_time(text)
+        user.settings.clock_offset_seconds = _compute_clock_offset(reported, user.timezone)
         user.registered_at = datetime.now(tz=timezone.utc)
         user.registration_state = None  # ← Registration complete
         await db.commit()
@@ -280,6 +293,30 @@ def _parse_time(raw: str) -> time:
         return time(int(parts[0]), int(parts[1]))
     except Exception:
         return time(8, 0)
+
+
+def _compute_clock_offset(reported_time: time, timezone_str: str | None) -> int:
+    """
+    Compute seconds the server clock is behind the user's real time.
+
+    Positive offset → server is behind (needs to be added to server UTC to get real UTC).
+    Clamped to ±12 hours to reject obviously wrong inputs.
+    """
+    try:
+        tz = pytz.timezone(timezone_str or "UTC")
+        now_utc = datetime.now(tz=timezone.utc)
+        local_today = now_utc.astimezone(tz).date()
+        reported_local = tz.localize(
+            datetime(local_today.year, local_today.month, local_today.day,
+                     reported_time.hour, reported_time.minute)
+        )
+        reported_utc = reported_local.astimezone(timezone.utc)
+        server_utc_floor = now_utc.replace(second=0, microsecond=0)
+        offset = int((reported_utc - server_utc_floor).total_seconds())
+        max_offset = 12 * 3600
+        return max(-max_offset, min(max_offset, offset))
+    except Exception:
+        return 0
 
 
 def _escape(text: str) -> str:
