@@ -128,3 +128,4 @@ class BaseLLMProvider(ABC):
             return bool(resp.text)
         except Exception:
             return False
+            return False

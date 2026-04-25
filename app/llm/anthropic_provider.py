@@ -87,3 +87,5 @@ class AnthropicProvider(BaseLLMProvider):
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(raw)
         return build_parsed_task(data)
+        data = json.loads(raw)
+        return build_parsed_task(data)

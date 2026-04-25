@@ -87,3 +87,5 @@ class OpenAIProvider(BaseLLMProvider):
         raw = response.choices[0].message.content or "{}"
         data = json.loads(raw)
         return build_parsed_task(data)
+        data = json.loads(raw)
+        return build_parsed_task(data)

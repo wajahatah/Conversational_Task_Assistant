@@ -86,3 +86,15 @@ Completion rate yesterday: {completion_rate}%
 
 Keep it under 150 words and end with a brief motivational note.
 """
+Yesterday:
+- Completed tasks: {completed_tasks}
+- Stalled tasks: {stalled_tasks}
+- Dropped tasks: {dropped_tasks}
+
+Today:
+- Scheduled tasks: {todays_tasks}
+
+Completion rate yesterday: {completion_rate}%
+
+Keep it under 150 words and end with a brief motivational note.
+"""

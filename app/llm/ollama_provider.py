@@ -103,3 +103,5 @@ class OllamaProvider(BaseLLMProvider):
             return response.status_code == 200
         except Exception:
             return False
+        except Exception:
+            return False

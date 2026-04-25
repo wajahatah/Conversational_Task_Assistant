@@ -78,3 +78,5 @@ class GeminiProvider(BaseLLMProvider):
         response = await model.generate_content_async(user_prompt)
         data = json.loads(response.text)
         return build_parsed_task(data)
+        data = json.loads(response.text)
+        return build_parsed_task(data)
