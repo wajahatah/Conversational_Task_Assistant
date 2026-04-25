@@ -36,8 +36,32 @@ from app.database.session import AsyncSessionLocal, engine
 from app.handlers.webhook_handler import _process_update
 from app.platform import get_platform_adapter
 from app.platform.discord_adapter import DiscordAdapter
+from app.scheduler.jobs import _evaluate_all_tasks_async, _dispatch_daily_summaries_async
 
 logger = structlog.get_logger(__name__)
+
+_background_loops_started = False
+
+
+async def _evaluation_loop() -> None:
+    """Evaluate task states and fire reminders every 60 seconds."""
+    logger.info("Task evaluation loop started")
+    while True:
+        try:
+            await _evaluate_all_tasks_async()
+        except Exception as exc:
+            logger.error("Evaluation loop error", error=str(exc))
+        await asyncio.sleep(60)
+
+
+async def _summary_loop() -> None:
+    """Check and dispatch daily summaries every 60 seconds."""
+    while True:
+        try:
+            await _dispatch_daily_summaries_async()
+        except Exception as exc:
+            logger.error("Summary loop error", error=str(exc))
+        await asyncio.sleep(60)
 
 
 def main() -> None:
@@ -58,8 +82,14 @@ def main() -> None:
 
     @client.event
     async def on_ready() -> None:
+        global _background_loops_started
         logger.info("Discord bot ready", username=str(client.user))
         print(f"Discord bot logged in as {client.user}. Send it a DM to start!")
+        if not _background_loops_started:
+            _background_loops_started = True
+            asyncio.create_task(_evaluation_loop())
+            asyncio.create_task(_summary_loop())
+            logger.info("Background evaluation and summary loops started")
 
     @client.event
     async def on_message(message: discord.Message) -> None:
