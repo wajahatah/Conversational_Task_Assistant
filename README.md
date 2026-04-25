@@ -539,12 +539,19 @@ Expected table list:
 
 ## 10. Start the Application
 
-The application needs **two terminals running at the same time**. Activate the
-virtual environment in each.
+How many terminals you need depends on which platform you run:
 
-### Terminal 1 — Celery Worker + Beat Scheduler
+- **Telegram** — needs **two** processes running together: a Celery worker (+ Beat) for
+  the scheduler, and `run_polling.py` for the bot itself.
+- **Discord** — only needs **one**: `run_discord.py` owns the event loop and runs the
+  evaluation + daily-summary jobs in-process. Celery is **not** required.
+
+Activate the virtual environment in each terminal you start.
+
+### Terminal 1 — Celery Worker + Beat Scheduler  *(Telegram only)*
 
 This process evaluates task states and dispatches nudges/summaries on a schedule.
+Skip this terminal if you're running Discord.
 
 ```bash
 # Windows (Requires two separate terminals)
@@ -598,6 +605,9 @@ source venv/bin/activate
 python run_discord.py
 ```
 
+> Discord runs the task-evaluation and daily-summary jobs as in-process asyncio loops
+> (every 60 seconds), so you do **not** need to start Celery alongside it.
+
 ### Terminal 3 (Optional) — FastAPI Dev Server
 
 Exposes a REST API and interactive Swagger docs. Useful for debugging.
@@ -625,8 +635,13 @@ The bot will walk you through a one-time setup:
 | 1 | Your full name | `Ali Hassan` |
 | 2 | Your email | `ali@example.com` |
 | 3 | Phone number | `+92 300 1234567` or `skip` |
-| 4 | Your timezone | `Asia/Karachi` |
+| 4 | Your timezone | `Asia/Karachi` or `UTC+5` |
 | 5 | Daily summary time | `08:00` |
+| 6 | Your current local time | `14:35` |
+
+> Step 6 calibrates a `clock_offset_seconds` value so reminders fire at your
+> actual wall-clock time even if the server clock or your stated timezone is
+> slightly off. You can re-run this flow at any time with `/register`.
 
 **Add your first task:**
 
@@ -724,8 +739,9 @@ docker exec -it task_kafka kafka-topics --bootstrap-server localhost:9092 --list
 
 | Command | Description |
 |---------|-------------|
-| `/start` | Start the bot / show welcome message |
+| `/start` | Start the bot / show welcome message. During registration this restarts the flow from step 1. |
 | `/help` | Display all available commands |
+| `/register` | Re-run the registration flow (update name, timezone, summary time, or recalibrate your clock). Existing tasks are preserved. |
 | `/tasks` | View all your tasks for today with their current state |
 | `/summary` | Receive your daily summary right now |
 
@@ -745,50 +761,58 @@ docker exec -it task_kafka kafka-topics --bootstrap-server localhost:9092 --list
 ## 15. Architecture Overview
 
 ```
-Platform User (Telegram/Discord)
+Platform User (Telegram / Discord)
      │
      ▼
-run_polling.py / run_discord.py ──► webhook_handler.py
-                                       │
-                            ┌──────────▼──────────────┐
-                            │                         │
-                            ▼                         ▼
-                registration.py             interaction_handler.py
-                (new users)                 (registered users)
-                                                      │
-                                       ┌──────────────┼──────────────┐
-                                       ▼              ▼               ▼
-                                handle_command  handle_text    handle_poll_response
-                                                     │
-                                             task_service.py ──► LLM (parse task)
-                                             orchestrator.py ──► LLM (help chat)
+run_polling.py / run_discord.py ──► platform adapter ──► webhook_handler._process_update
+                                                                    │
+                            ┌───────────────────────────────────────┴────────────────┐
+                            ▼                                                        ▼
+                  registration.py                                       interaction_handler.py
+                  (unknown user OR /register OR                         (fully registered users)
+                   registration_state ≠ null)                                        │
+                  ┌──────────────────────────────┐         ┌───────────────────────┼─────────────────────────┐
+                  │ name → email → phone →       │         ▼                       ▼                         ▼
+                  │ timezone → summary_time →    │   handle_command          handle_text             handle_poll_response
+                  │ current_time (clock_offset)  │   (/start /help                  │                        │
+                  └──────────────────────────────┘    /register /tasks         active HELP?               look up
+                                                       /summary)               yes ─► orchestrator         Interaction
+                                                                               no  ─► task_service         by message_id
+                                                                                       │                        │
+                                                                                LLM.parse_task        DONE/IN_PROGRESS/
+                                                                                                      DROP/NEED_HELP/STALL
 
-Celery Beat (every 5 min)
+Scheduler  (Celery Beat for Telegram, in-process asyncio loops for Discord)
      │
-     ▼
-evaluate_all_tasks()
+     ├─ every 5 min  ─► evaluate_all_tasks()
+     │                     ├─► state_engine.py      (NOT_STARTED / ACTIVE / AT_RISK_1 / AT_RISK_2 / STALLED)
+     │                     ├─► intervention_engine  (start reminder / status poll / urgent poll / escalation / final poll)
+     │                     └─► notification_service (send via adapter + log Interaction)
      │
-     ├──► state_engine.py      (infer: ACTIVE / AT_RISK / STALLED)
-     ├──► intervention_engine.py (decide: poll / reminder / escalation)
-     └──► notification_service.py (send + log)
-
-Celery Beat (every minute)
-     │
-     ▼
-dispatch_daily_summaries()
-     └──► summary_service.py ──► LLM (generate summary)
+     └─ every minute ─► dispatch_daily_summaries()
+                          └─► matches each user's local hour:minute via clock_offset_seconds
+                          └─► summary_service.py ──► LLM (or plain-text fallback)
 ```
 
 **Infrastructure:**
 
 | Component | Technology |
 |-----------|-----------|
-| Bot messaging | python-telegram-bot v21 / discord.py v2.3 |
+| Bot messaging | python-telegram-bot v21 / discord.py v2 |
 | Web framework | FastAPI + uvicorn |
-| Database | PostgreSQL 16 (asyncpg + SQLAlchemy) |
-| Task queue | Celery + Redis |
-| Event bus | Kafka (future use) |
-| LLM | Pluggable: Ollama / HuggingFace / OpenAI / Gemini / Anthropic |
+| Database | PostgreSQL 16 (asyncpg + SQLAlchemy async) |
+| Migrations | Alembic |
+| Broker / cache | Redis |
+| Task scheduler | Celery + Celery Beat (Telegram); in-process asyncio loops (Discord — no Celery needed) |
+| Event bus | Kafka — provisioned in `docker-compose.yml`, reserved for future use |
+| LLM | Pluggable: OpenAI / Gemini / Anthropic / Ollama / HuggingFace |
+
+> **Discord runners do not require Celery.** `run_discord.py` owns the event loop and runs
+> the same evaluation and summary jobs as in-process asyncio loops every 60 seconds.
+> Celery is still required for Telegram if you want scheduled nudges and summaries.
+
+For full state-machine, intervention, and data-model details see [`architecture.md`](./architecture.md)
+and [`architecture_engineering.md`](./architecture_engineering.md).
 
 ---
 
