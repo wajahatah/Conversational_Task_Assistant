@@ -99,8 +99,8 @@ async def _evaluate_all_tasks_async():
                 if platform_id and decision.action.value != "no_action":
                     await dispatch_intervention(db, task, decision, platform_id)
 
-                    # If STALLED escalation was sent, flag no_more_action
-                    if decision.action == ActionType.SEND_ESCALATION:
+                    # Prevent re-sending escalation or final poll
+                    if decision.action in (ActionType.SEND_ESCALATION, ActionType.SEND_FINAL_POLL):
                         await mark_no_more_action(db, task)
 
             except Exception as exc:

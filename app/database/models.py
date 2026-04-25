@@ -45,6 +45,7 @@ class TaskState(str, enum.Enum):
 
 class InteractionType(str, enum.Enum):
     POLL = "poll"
+    URGENT_POLL = "urgent_poll"
     REMINDER = "reminder"
     MESSAGE = "message"
     SYSTEM = "system"
@@ -55,6 +56,7 @@ class ResponseType(str, enum.Enum):
     IN_PROGRESS = "in_progress"
     DROP = "drop"
     NEED_HELP = "need_help"
+    STALL = "stall"
 
 
 class ConversationRole(str, enum.Enum):
@@ -248,6 +250,7 @@ class UserSettings(Base):
     max_extensions: Mapped[int] = mapped_column(Integer, default=2)
     max_ignored_prompts: Mapped[int] = mapped_column(Integer, default=3)
     nudge_cooldown_minutes: Mapped[int] = mapped_column(Integer, default=30)
+    clock_offset_seconds: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

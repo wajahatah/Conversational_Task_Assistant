@@ -7,11 +7,14 @@ Maps poll options (DONE, IN_PROGRESS, DROP, NEED_HELP) to system actions.
 
 from __future__ import annotations
 
+import zoneinfo
+from datetime import datetime
+
 import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database.models import Interaction, ResponseType, Task, TaskState, User
+from app.database.models import Interaction, InteractionType, ResponseType, Task, TaskState, User
 from app.platform.base import NormalizedMessage
 from app.services import orchestrator
 from app.services.notification_service import send_plain_message
@@ -24,6 +27,15 @@ from app.services.task_service import (
 )
 
 logger = structlog.get_logger(__name__)
+
+
+def _fmt_time(dt: datetime, user: User) -> str:
+    """Format a UTC-aware datetime as HH:MM in the user's local timezone."""
+    try:
+        tz = zoneinfo.ZoneInfo(user.timezone or "UTC")
+    except (zoneinfo.ZoneInfoNotFoundError, KeyError):
+        tz = zoneinfo.ZoneInfo("UTC")
+    return dt.astimezone(tz).strftime("%H:%M")
 
 
 async def handle_poll_response(
@@ -40,24 +52,30 @@ async def handle_poll_response(
     if not response:
         return
 
-    # Find the most recent unanswered interaction for this user
-    result = await db.execute(
-        select(Interaction)
-        .join(Task, Interaction.task_id == Task.id)
-        .where(
-            Interaction.user_id == user.id,
-            Interaction.response_type.is_(None),
-            Task.state.notin_([TaskState.COMPLETED, TaskState.DROPPED]),
+    # Look up the SPECIFIC interaction the user clicked on, by message_id.
+    # Without this, every click would resolve to "the most recent unanswered
+    # interaction" and a single button tap could complete an unrelated task.
+    interaction: Interaction | None = None
+    if msg.poll_message_id:
+        result = await db.execute(
+            select(Interaction).where(
+                Interaction.user_id == user.id,
+                Interaction.message_id == msg.poll_message_id,
+            )
         )
-        .order_by(Interaction.created_at.desc())
-        .limit(1)
-    )
-    interaction = result.scalar_one_or_none()
+        interaction = result.scalar_one_or_none()
 
     if not interaction:
         await send_plain_message(
             user.platform_id,
-            "⚠️ No active task poll found\\. Send me a task to get started\\!",
+            "⚠️ This poll is no longer active\\. Send me a task to get started\\!",
+        )
+        return
+
+    if interaction.response_type is not None:
+        await send_plain_message(
+            user.platform_id,
+            "⚠️ You've already responded to this prompt\\.",
         )
         return
 
@@ -73,18 +91,17 @@ async def handle_poll_response(
     interaction.response_type = ResponseType(response.lower())
     await db.commit()
 
-    await _apply_response(db, user, task, response)
+    await _apply_response(db, user, task, interaction, response)
 
 
 async def _apply_response(
     db: AsyncSession,
     user: User,
     task: Task,
+    interaction: Interaction,
     response: str,
 ) -> None:
     """Apply the business logic for each poll response."""
-    user_settings = user.settings
-
     if response == "DONE":
         await update_task_state(db, task, TaskState.COMPLETED)
         await send_plain_message(
@@ -92,21 +109,32 @@ async def _apply_response(
             f"✅ Great work\\! *{_escape(task.title)}* marked as complete\\. 🎉",
         )
 
+    elif response == "STALL":
+        await update_task_state(db, task, TaskState.STALLED)
+        await send_plain_message(
+            user.platform_id,
+            f"🔴 *{_escape(task.title)}* marked as stalled\\. "
+            "I'll include it in tomorrow's summary\\.",
+        )
+
     elif response == "IN_PROGRESS":
-        max_ext = user_settings.max_extensions if user_settings else 2
-        if task.extensions_count >= max_ext:
+        if interaction.type == InteractionType.URGENT_POLL:
+            # Second nudge (10% remaining) — extend by 50% of original duration
+            original_seconds = (task.deadline - task.start_time).total_seconds()
+            extra_minutes = max(5, int(original_seconds * 0.5 / 60))
+            extended_task = await extend_task(db, task, extra_minutes=extra_minutes)
             await send_plain_message(
                 user.platform_id,
-                f"⚠️ You've reached the maximum extensions for *{_escape(task.title)}*\\. "
-                "The task will be reviewed at its original deadline\\.",
+                f"⏳ Got it\\! *{_escape(task.title)}* extended by {extra_minutes} minutes\\. "
+                f"New deadline: *{_fmt_time(extended_task.deadline, user)}*\\. "
+                "You've got this\\! 💪",
             )
         else:
-            extended_task = await extend_task(db, task)
+            # First nudge or start reminder — acknowledge only, no extension
             await send_plain_message(
                 user.platform_id,
-                f"⏳ Got it\\! *{_escape(task.title)}* extended by 30 minutes\\. "
-                f"New deadline: *{extended_task.deadline.strftime('%H:%M')}*\\. "
-                "You've got this\\! 💪",
+                f"👍 Keep it up\\! *{_escape(task.title)}* \\— "
+                f"deadline: *{_fmt_time(task.deadline, user)}*\\.",
             )
 
     elif response == "DROP":

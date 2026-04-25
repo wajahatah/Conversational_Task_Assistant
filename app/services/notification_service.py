@@ -7,6 +7,7 @@ via the Platform Adapter. Also logs each interaction to the database.
 
 from __future__ import annotations
 
+import zoneinfo
 from datetime import datetime, timezone
 
 import structlog
@@ -51,17 +52,17 @@ async def dispatch_intervention(
     content: str = ""
     interaction_type = InteractionType.SYSTEM
 
+    user_tz = (task.user.timezone if task.user else None) or "UTC"
+
     if decision.action == ActionType.SEND_START_REMINDER:
         content = (
             f"⏰ *Time to start:* {_escape(task.title)}\n\n"
-            f"Your task begins now\\. Deadline: {_format_time(task.deadline)}\n\n"
-            "How's it looking?"
+            f"Your task begins now\\. Deadline: *{_format_time(task.deadline, user_tz)}*"
         )
-        message_id = await adapter.send_poll(
+        message_id = await adapter.send_message(OutboundMessage(
             platform_id=platform_id,
-            question=content,
-            options=STANDARD_POLL_OPTIONS,
-        )
+            text=content,
+        ))
         interaction_type = InteractionType.REMINDER
 
     elif decision.action == ActionType.SEND_STATUS_POLL:
@@ -88,7 +89,22 @@ async def dispatch_intervention(
             question=content,
             options=STANDARD_POLL_OPTIONS,
         )
-        interaction_type = InteractionType.POLL
+        interaction_type = InteractionType.URGENT_POLL
+
+    elif decision.action == ActionType.SEND_FINAL_POLL:
+        content = (
+            f"⌛ *Time's up:* {_escape(task.title)}\n\n"
+            "Your extended deadline has passed\\. Were you able to complete it?"
+        )
+        message_id = await adapter.send_poll(
+            platform_id=platform_id,
+            question=content,
+            options=[
+                PollOption(text="Yes, Done!", callback_data="DONE"),
+                PollOption(text="No, Mark Stalled", callback_data="STALL"),
+            ],
+        )
+        interaction_type = InteractionType.SYSTEM
 
     elif decision.action == ActionType.SEND_ESCALATION:
         content = (

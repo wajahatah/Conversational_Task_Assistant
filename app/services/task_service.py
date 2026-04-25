@@ -16,8 +16,9 @@ import pytz
 import structlog
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from app.database.models import Task, TaskState, User
+from app.database.models import Task, TaskState, User, UserSettings
 from app.llm import get_llm_provider, ParsedTask
 
 logger = structlog.get_logger(__name__)
@@ -119,11 +120,15 @@ async def get_active_tasks(db: AsyncSession) -> list[Task]:
     """
     terminal_states = [TaskState.COMPLETED, TaskState.DROPPED]
     result = await db.execute(
-        select(Task).where(
+        select(Task)
+        .where(
             and_(
                 Task.state.notin_(terminal_states),
                 Task.task_date == date.today(),
             )
+        )
+        .options(
+            selectinload(Task.user).selectinload(User.settings)
         )
     )
     return list(result.scalars().all())
@@ -215,6 +220,9 @@ def _parse_iso(dt_str: str | None) -> datetime | None:
         dt = datetime.fromisoformat(dt_str)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except ValueError:
+        return None
         return dt
     except ValueError:
         return None
